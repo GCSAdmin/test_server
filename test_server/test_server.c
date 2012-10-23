@@ -430,11 +430,6 @@ main(
 
     g_count_on = 0;
 
-    for (i = 0; i < global_info.concurrency; ++i)
-    {
-        total_cnt += g_runcnt_array[j];
-    }
-
     printf("AVG QPS: %f\n", (float)total_cnt / global_info.time );
     fflush(stdout);
 
