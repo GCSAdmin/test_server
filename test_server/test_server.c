@@ -19,9 +19,11 @@ const GOptionEntry arg_options[] ={
     {"--time",                  't', 0, G_OPTION_ARG_INT,       &global_info.time,          "listen port(default 33060) .", NULL},
     {"--tablename",             'T', 0, G_OPTION_ARG_STRING,    &global_info.tablename,          "listen port(default 33060) .", NULL},
     {"--percent",               'e', 0, G_OPTION_ARG_INT,       &global_info.percent,          "listen port(default 33060) .", NULL},
-    {"--max_pk_value",          'n', 0, G_OPTION_ARG_INT,       &global_info.max_pk_value,  "listen port(default 33060) .", NULL},
+    {"--max_pk_value",          'n', 0, G_OPTION_ARG_STRING,    &global_info.max_pk_value_str,  "listen port(default 33060) .", NULL},
     {"--interval",              'i', 0, G_OPTION_ARG_INT,       &global_info.interval,  "listen port(default 33060) .", NULL},
     {"--wait_time",             'w', 0, G_OPTION_ARG_INT,       &global_info.wait_time,  "listen port(default 33060) .", NULL},
+    {"--warn",                  'W', 0, G_OPTION_ARG_INT,       &global_info.is_warn,  "listen port(default 33060) .", NULL},
+    {"--ratio",                 'r', 0, G_OPTION_ARG_STRING,    &global_info.ratio_str,          "listen port(default 33060) .", NULL},
     {"--sql",                   's', 0, G_OPTION_ARG_STRING,    &global_info.sql,          "listen port(default 33060) .", NULL},
     {NULL,                      0,   0, 0,                      NULL,                   NULL, NULL},
 }; 
@@ -34,22 +36,163 @@ gchar* help_str =
 -p, --password              password(default '')\n\
 -c, --concurrnecy           concurrnecy of test server(default 10)\n\
 -t, --time                  test run time(seconds)(default 60s)\n\
--T, --tablename             test table name, must be set\n\
--n, --max_pk_value          test table max pk value(digit), must be set\n\
+-T, --tablename             test table name, must be set, maybe multi(t1;t2;t3)\n\
+-n, --max_pk_value          test table max pk value(digit), must be set, maybe multi(n1;n2;n3)\n\
 -e, --percent               percent of test pk value(1-100), default 100\n\
 -i, --interval              collect reslut interval, default 10\n\
+-W, --warn                  whether execute select count(*) from tbl to warn data, default 1\n\
 -w, --wait_time             wait time before measure, default 60\n\
--s, --sql                   test sql, like select * from t1 where id = ?, must be set\n\n";
+-r, --ratio                 ratio of sql, like 5:1:1\n\
+-s, --sql                   test sql, like select * from t1 where id = ?, must be set, maybe multi(like sql1;sql2;sql3)\n\n";
+
+
+gboolean
+g_str_has_prefix_ignore_space_and_case(
+    gchar*          str,
+    gchar*          prefix
+)
+{
+    gchar*      p = str;
+
+    while (p)
+    {
+        if (!g_ascii_isspace(*p))
+        {
+            break;
+        }
+
+        p++;
+    }
+
+    if (!p)
+        return 0;
+
+    return !g_ascii_strncasecmp(p, prefix, strlen(prefix));
+    
+}
 
 int
 test_server_global_init()
 { 
-    if (!global_info.tablename || !global_info.sql || global_info.max_pk_value == 0)
+    gchar**         table_arr;
+    gchar**         sql_arr;
+    gchar**         ratio_str_arr = NULL;
+    gchar**         num_arr;
+    gint            table_cnt;
+    gint            sql_cnt, ratio_cnt, num_cnt;
+    gint            i;
+    gint            total_ratio = 0;
+
+    if (!global_info.tablename || !global_info.sql || !global_info.max_pk_value_str)
     {
         fprintf(stderr, "%s tablename, sql, max_pk_value option must be set \n",
                 G_STRLOC);
         return -1;
     }
+
+    table_arr = g_strsplit(global_info.tablename, ";", 0);
+    sql_arr = g_strsplit(global_info.sql, ";", 0);
+    num_arr = g_strsplit(global_info.max_pk_value_str, ";", 0);
+
+    table_cnt = g_strv_length(table_arr);
+    sql_cnt = g_strv_length(sql_arr);
+    num_cnt = g_strv_length(num_arr);
+
+    if (global_info.ratio_str)
+    {
+        ratio_str_arr = g_strsplit(global_info.ratio_str, ":", 0);
+        ratio_cnt = g_strv_length(ratio_str_arr);
+    }
+    else
+    {
+        ratio_cnt = table_cnt;
+    }
+    
+    if (table_cnt != sql_cnt || table_cnt != num_cnt || table_cnt != ratio_cnt)
+    {
+        fprintf(stderr, "%s number of element of tablename, sql, max_pk_value must be same \n",
+            G_STRLOC);
+        return -1;
+    }
+
+    global_info.table_cnt = table_cnt;
+    global_info.table_arr = table_arr;
+    global_info.sql_arr = sql_arr;
+
+
+
+    global_info.sql_type_arr = g_new0(int, global_info.table_cnt + 1);
+    for (i = 0; i < global_info.table_cnt; ++i)
+    {
+        if (g_str_has_prefix_ignore_space_and_case(global_info.sql_arr[i], "SELECT"))
+        {
+            global_info.sql_type_arr[i] = SQL_TYPE_SELECT;
+        }
+        else if (g_str_has_prefix_ignore_space_and_case(global_info.sql_arr[i], "INSERT"))
+        {
+            global_info.sql_type_arr[i] = SQL_TYPE_INSERT;
+        }
+        else if (g_str_has_prefix_ignore_space_and_case(global_info.sql_arr[i], "UPDATE"))
+        {
+            global_info.sql_type_arr[i] = SQL_TYPE_UPDATE;
+        } 
+        else if (g_str_has_prefix_ignore_space_and_case(global_info.sql_arr[i], "DELETE"))
+        {
+            global_info.sql_type_arr[i] = SQL_TYPE_DELETE;
+        }
+        else
+        {
+            global_info.sql_type_arr[i] = SQL_TYPE_UNKNOW;
+
+            fprintf(stderr, "%s unknow sql type %s \n",
+                G_STRLOC, global_info.sql_arr[i]);
+            return -1;
+        }
+    }
+
+    global_info.max_pk_value_arr = g_new0(int, global_info.table_cnt + 1);
+    for (i = 0; i < global_info.table_cnt; ++i)
+    {
+        global_info.max_pk_value_arr[i] = atoi(num_arr[i]);
+
+        if (global_info.max_pk_value_arr[i] <= 0)
+        {
+            fprintf(stderr, "%s invalid max_pk_value\n",
+                G_STRLOC);
+            return -1;
+        }
+    }
+
+    g_strfreev(num_arr);
+
+    global_info.ratio_arr = g_new0(int, global_info.table_cnt + 1);
+    
+    for (i = 0; i < global_info.table_cnt; ++i)
+    {
+        
+        if (ratio_str_arr)
+        {
+            gint r = atoi(ratio_str_arr[i]);
+
+            if (r <= 0)
+            {
+                fprintf(stderr, "%s invalid ratio\n",
+                    G_STRLOC);
+                return -1;
+            }
+
+            total_ratio += r;
+        }
+        else
+        {
+            /* 如果没设定该参数，所有比例是1:1 */
+            total_ratio += 1;
+        }
+        
+        global_info.ratio_arr[i] = total_ratio;
+    }
+
+    g_strfreev(ratio_str_arr);
 
     if (global_info.wait_time == 0)
         global_info.wait_time = 60;
@@ -84,11 +227,22 @@ test_server_global_init()
 void
 test_server_global_deinit()
 {
-    if (global_info.sql != NULL)
-        g_free(global_info.sql);
+    g_free(global_info.sql);
+
+    g_strfreev(global_info.sql_arr);
+
+    if (global_info.ratio_str != NULL)
+        g_free(global_info.ratio_str);
+
+    g_free(global_info.ratio_arr);
 
     if (global_info.tablename)
         g_free(global_info.tablename);
+
+    g_strfreev(global_info.table_arr);
+
+    g_free(global_info.max_pk_value_str);
+    g_free(global_info.max_pk_value_arr);
 
     if (global_info.host)
         g_free(global_info.host);
@@ -217,8 +371,11 @@ test_server_worker_thread(
     MYSQL*      conn;
     int         errnum = 0;
     MYSQL_BIND  param;
+    MYSQL_STMT**stmt_arr = NULL;
     MYSQL_STMT* stmt = NULL;
     int         rand_id = 0;
+    int         rand_tbl_id = 0;
+    int         i;
 
     conn = mysql_init(NULL);
 
@@ -229,6 +386,7 @@ test_server_worker_thread(
         goto sqlerr;
     }
 
+    /* 直到连接成功为止 */
 connect_again:
     if (mysql_real_connect(conn, global_info.host, global_info.username, global_info.password, NULL, global_info.port, NULL, 0) == NULL)
     {
@@ -237,24 +395,50 @@ connect_again:
         goto connect_again;
     }
 
-    stmt = mysql_stmt_init(conn);
+    stmt_arr = g_new0(MYSQL_STMT*, global_info.table_cnt + 1);
 
-    if (mysql_stmt_prepare(stmt, global_info.sql, strlen(global_info.sql)) )
+    for (i = 0; i < global_info.table_cnt; ++i)
     {
-        mysql_print_error(conn, NULL);
-        goto sqlerr;
-    }
+        stmt = mysql_stmt_init(conn);
 
+        if (mysql_stmt_prepare(stmt, global_info.sql_arr[i], strlen(global_info.sql_arr[i])) )
+        {
+            mysql_print_error(conn, NULL);
+            goto sqlerr;
+        }
+
+        stmt_arr[i] = stmt;
+    }
+    
     /* 防止多个线程相同种子 */
     srand(time(NULL) + num_of_thread);
     while (1)
     {
+        int r_id = rand() % global_info.ratio_arr[global_info.table_cnt - 1];
+
+        for (i =0; i < global_info.table_cnt; ++i)
+        {
+            if (r_id < global_info.ratio_arr[i])
+            {
+                rand_tbl_id = i;
+                break;
+            }
+        }
+
+        stmt = stmt_arr[rand_tbl_id];
+
         /* generate the random num  */
-        rand_id = rand() % global_info.max_pk_value + 1;
+        rand_id = rand() % global_info.max_pk_value_arr[rand_tbl_id] + 1;
 
         memset(&param, 0, sizeof(MYSQL_BIND)); /* initialize */
         param.buffer_type = MYSQL_TYPE_LONG;
         param.buffer = &rand_id;
+
+        //if (mysql_stmt_prepare(stmt, global_info.sql_arr[rand_tbl_id], strlen(global_info.sql_arr[rand_tbl_id])) )
+        //{
+        //    mysql_print_error(conn, NULL);
+        //    goto sqlerr;
+        //}
 
         if( mysql_stmt_bind_param(stmt, &param) )
         {
@@ -268,7 +452,7 @@ connect_again:
             goto sqlerr;
         }
 
-        if (global_info.is_select)
+        if (global_info.sql_type_arr[rand_tbl_id] == SQL_TYPE_SELECT)
         {
             if( mysql_stmt_store_result(stmt) )
             {
@@ -284,9 +468,18 @@ connect_again:
     }
 
 sqlerr:
-    fprintf(stderr, "%s: something error while executing %s, id = %d, thread num %d", G_STRLOC, global_info.sql, rand_id, num_of_thread);
-    if (stmt)
-        mysql_stmt_close(stmt);
+    fprintf(stderr, "%s: something error while executing %s, id = %d, thread num %d\n", 
+        G_STRLOC, global_info.sql_arr[rand_tbl_id], rand_id, num_of_thread);
+
+    for (i = 0; i < global_info.table_cnt; ++i)
+    {
+        stmt = stmt_arr[i];
+        if (stmt)
+            mysql_stmt_close(stmt);
+
+    }
+
+    g_free(stmt_arr);
     mysql_close(conn);
 
     return NULL;
@@ -299,6 +492,7 @@ test_server_warn_data()
     MYSQL_RES*  res_set;
     gchar       buff[1024];
     int         errnum = 0;
+    int         i = 0;
 
     conn = mysql_init(NULL);
 
@@ -316,26 +510,28 @@ test_server_warn_data()
         goto err;
     }
 
-    sprintf(buff, "select count(*) from %s", global_info.tablename);
-
-    if (mysql_query(conn, buff))
+    for (i = 0; i < global_info.table_cnt; ++i)
     {
-        fprintf(stderr, "%s: mysql_real_connect %s fail", G_STRLOC, buff);
-        errnum = -1;
-        goto err;
-    }
-    else
-    {
-        res_set = mysql_store_result(conn);
+        sprintf(buff, "select count(*) from %s", global_info.table_arr[i]);
 
-        if (res_set == NULL)
+        if (mysql_query(conn, buff))
         {
-            fprintf(stderr, "%s: mysql_store_result %s fail", G_STRLOC, buff);
+            fprintf(stderr, "%s: mysql_real_connect %s fail", G_STRLOC, buff);
             errnum = -1;
             goto err;
         }
-    }
+        else
+        {
+            res_set = mysql_store_result(conn);
 
+            if (res_set == NULL)
+            {
+                fprintf(stderr, "%s: mysql_store_result %s fail", G_STRLOC, buff);
+                errnum = -1;
+                goto err;
+            }
+        }
+    }
 err:
     mysql_close(conn);
 
@@ -366,6 +562,8 @@ main(
         exit(-1);
     }
 
+    global_info.is_warn = 1;
+
     if (test_server_parse_options(&argc, &argv))
     {
         exit(-1);
@@ -383,17 +581,33 @@ main(
 [concurrency] : %d,\n\
 [time] : %d(s),\n\
 [tablename] : %s,\n\
-[max_pk_value] : %d,\n\
+[max_pk_value] : %s,\n\
 [percent] : %d,\n\
 [interval] : %d,\n\
 [wait_time] : %d,\n\
+[warn] : %d,\n\
+[ratio] : %s,\n\
 [sql] : %s\n\n", global_info.host, global_info.port, global_info.username, 
                 global_info.password, global_info.concurrency, global_info.time, global_info.tablename,
-                 global_info.max_pk_value, global_info.percent, global_info.interval, global_info.wait_time, global_info.sql);
+                 global_info.max_pk_value_str, global_info.percent, global_info.interval, global_info.wait_time, 
+                 global_info.is_warn, global_info.ratio_str, global_info.sql);
     
-    printf("Start warn data\n");
-    if (test_server_warn_data())
-        exit(-1);
+    if (global_info.is_warn)
+    {
+        time_t      t;
+
+        printf("Start warn data");
+
+        t = time(NULL);
+        if (test_server_warn_data())
+            exit(-1);
+
+        printf(", execute time :%d\n", time(NULL) - t);
+    }
+    else
+    {
+        printf("don't warn data\n");        
+    }
     
     arg_arr = (gint*)g_malloc0(sizeof(gint) * global_info.concurrency);
 

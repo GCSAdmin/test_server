@@ -47,6 +47,12 @@
 
 #define MAX_STRLEN 128
 
+#define SQL_TYPE_UNKNOW 0
+#define SQL_TYPE_SELECT 1
+#define SQL_TYPE_INSERT 2
+#define SQL_TYPE_UPDATE 3
+#define SQL_TYPE_DELETE 4
+
 struct global_info_stuct 
 {
     gchar*      host;       
@@ -55,13 +61,21 @@ struct global_info_stuct
     gchar*      password;   
     gint        concurrency;
     gint        time;       
+    gint        table_cnt;
     gchar*      tablename;
-    gchar*      sql;        
+    gchar**     table_arr;
+    gchar*      sql;
+    gchar**     sql_arr;
+    gint*       sql_type_arr;
+    gchar*      ratio_str;
+    gint*       ratio_arr;      /* 对应sql的比例，ratio_arr[table_cnt - 1]表示比例总数 */
     gint        is_select;
     gint        percent;
-    gint        max_pk_value;
+    gchar*      max_pk_value_str;
+    gint*       max_pk_value_arr;
     gint        interval;
     gint        wait_time;
+    gint        is_warn;
 };
 
 
