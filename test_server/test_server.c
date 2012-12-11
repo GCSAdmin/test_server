@@ -45,6 +45,34 @@ gchar* help_str =
 -r, --ratio                 ratio of sql, like 5:1:1\n\
 -s, --sql                   test sql, like select * from t1 where id = ?, must be set, maybe multi(like sql1;sql2;sql3)\n\n";
 
+#ifndef _WIN32
+#include <signal.h>
+void dump(int signo)
+{
+	char buf[1024];
+	char cmd[2024];
+
+	FILE *fh;
+
+	snprintf(buf, sizeof(buf), "/proc/%d/cmdline", getpid());
+	if (!(fh = fopen(buf, "r")))
+		exit(0);
+	if (!fgets(buf, sizeof(buf), fh))
+		exit(0);
+
+	fclose(fh);
+
+	if(buf[strlen(buf)-1] == '\n')
+		buf[strlen(buf)-1] = '\0';
+
+	snprintf(cmd, sizeof(cmd), "gdb %s %d", buf, getpid());
+	system(cmd);
+
+	exit(0);
+}
+
+
+#endif
 
 gboolean
 g_str_has_prefix_ignore_space_and_case(
@@ -376,6 +404,7 @@ test_server_worker_thread(
     int         rand_id = 0;
     int         rand_tbl_id = 0;
     int         i;
+    int         conn_cnt = 0;
 
     conn = mysql_init(NULL);
 
@@ -392,7 +421,10 @@ connect_again:
     {
         fprintf(stderr, "%s: mysql_real_connect fail\n", G_STRLOC);
         mysql_print_error(conn, NULL);
-        goto connect_again;
+        if (conn_cnt++ < 100)
+        	goto connect_again;
+		else
+			goto sqlerr;
     }
 
     stmt_arr = g_new0(MYSQL_STMT*, global_info.table_cnt + 1);
@@ -468,8 +500,8 @@ connect_again:
     }
 
 sqlerr:
-    fprintf(stderr, "%s: something error while executing %s, id = %d, thread num %d\n", 
-        G_STRLOC, global_info.sql_arr[rand_tbl_id], rand_id, num_of_thread);
+    fprintf(stderr, "%s: something error while executing %s, id = %d, thread num %d, conn_cnt %d\n", 
+        G_STRLOC, global_info.sql_arr[rand_tbl_id], rand_id, num_of_thread, conn_cnt);
 
     for (i = 0; i < global_info.table_cnt; ++i)
     {
@@ -552,7 +584,11 @@ main(
     gint                prev_total_cnt = 0;
     gint                total_cnt = 0;
     gint*               arg_arr = NULL;
-
+	
+#ifndef _WIN32
+    signal(SIGSEGV, &dump);
+    signal(SIGFPE, &dump);
+#endif
     /*** ¶ÁÈ¡ÅäÖÃÐÅÏ¢ ***/
     if (argc == 2 &&
         (strcmp(argv[1], "--help") == 0 ||
@@ -615,6 +651,9 @@ main(
     {
         arg_arr[i] = i;
         worker_thread = g_thread_create((GThreadFunc)test_server_worker_thread, (gpointer)&arg_arr[i], TRUE, &gerr); 
+#ifndef _WIN32 
+		usleep(10);
+#endif
     }
 
     /* wait thread to start and create the connections */
