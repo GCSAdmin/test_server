@@ -42,8 +42,8 @@
 
 /*  mysql  */
 #include <mysql.h>
-#include <my_global.h>
-#include <my_sys.h>
+//#include <my_global.h>
+//#include <my_sys.h>
 
 #define MAX_STRLEN 128
 
