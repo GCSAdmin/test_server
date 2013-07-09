@@ -25,6 +25,8 @@ const GOptionEntry arg_options[] ={
     {"--warn",                  'W', 0, G_OPTION_ARG_INT,       &global_info.is_warn,  "listen port(default 33060) .", NULL},
     {"--ratio",                 'r', 0, G_OPTION_ARG_STRING,    &global_info.ratio_str,          "listen port(default 33060) .", NULL},
     {"--sql",                   's', 0, G_OPTION_ARG_STRING,    &global_info.sql,          "listen port(default 33060) .", NULL},
+    {"--max_table_id",          'm', 0, G_OPTION_ARG_INT,       &global_info.max_table_id, "max table id(default 0) .", NULL},
+    {"--sleep",                 'S', 0, G_OPTION_ARG_INT,       &global_info.sleep, "each query sleep millisecond .", NULL},
     {NULL,                      0,   0, 0,                      NULL,                   NULL, NULL},
 }; 
 
@@ -42,6 +44,8 @@ gchar* help_str =
 -i, --interval              collect reslut interval, default 10\n\
 -W, --warn                  whether execute select count(*) from tbl to warn data, default 1\n\
 -w, --wait_time             wait time before measure, default 60\n\
+-m, --max_table_id          talbename must contain '%d', and tablename convert to tablename_0 ~ table_name_max_table_id\n\
+-s, --sleep          		each query sleep millisecond\n\
 -r, --ratio                 ratio of sql, like 5:1:1\n\
 -s, --sql                   test sql, like select * from t1 where id = ?, must be set, maybe multi(like sql1;sql2;sql3)\n\n";
 
@@ -143,12 +147,36 @@ test_server_global_init()
         return -1;
     }
 
-    global_info.table_cnt = table_cnt;
-    global_info.table_arr = table_arr;
-    global_info.sql_arr = sql_arr;
+    /* table_name 模糊匹配 */
+    if (global_info.max_table_id)
+    {
+        if (table_cnt != 1 || !strstr(global_info.tablename, "%d") || !strstr(global_info.sql, "%d"))
+        {
+            fprintf(stderr, "max_table_id has set, table/sql num must be 1 and contains '%d'\n",
+                G_STRLOC);
+            return -1;
+        }
 
+        global_info.table_cnt = global_info.max_table_id + 1;
 
-
+        global_info.table_arr = g_new0(gchar*, global_info.table_cnt + 1);
+        global_info.sql_arr = g_new0(gchar*, global_info.table_cnt + 1);
+        for (i = 0; i < global_info.table_cnt; ++i)
+        {
+            global_info.table_arr[i] = g_strdup_printf(global_info.tablename, i);
+            global_info.sql_arr[i] = g_strdup_printf(global_info.sql, i);
+        }
+        
+        g_strfreev(table_arr);
+        g_strfreev(sql_arr);
+    }
+    else
+    {
+        global_info.table_cnt = table_cnt;
+        global_info.table_arr = table_arr;
+        global_info.sql_arr = sql_arr;
+    }
+    
     global_info.sql_type_arr = g_new0(int, global_info.table_cnt + 1);
     for (i = 0; i < global_info.table_cnt; ++i)
     {
@@ -181,7 +209,12 @@ test_server_global_init()
     global_info.max_pk_value_arr = g_new0(int, global_info.table_cnt + 1);
     for (i = 0; i < global_info.table_cnt; ++i)
     {
-        global_info.max_pk_value_arr[i] = atoi(num_arr[i]);
+        if (global_info.max_table_id)
+        {
+            global_info.max_pk_value_arr[i] = atoi(num_arr[0]);
+        }
+        else
+            global_info.max_pk_value_arr[i] = atoi(num_arr[i]);
 
         if (global_info.max_pk_value_arr[i] <= 0)
         {
@@ -443,7 +476,7 @@ connect_again:
     }
     
     /* 防止多个线程相同种子 */
-    srand(time(NULL) + num_of_thread);
+    srand(time(NULL) + num_of_thread * 10000);
     while (1)
     {
         int r_id = rand() % global_info.ratio_arr[global_info.table_cnt - 1];
@@ -497,6 +530,11 @@ connect_again:
 
         if (g_count_on)
             g_runcnt_array[num_of_thread]++;
+
+        if (global_info.sleep)
+        {
+            my_msleep(global_info.sleep * 1000);
+        }
     }
 
 sqlerr:
@@ -621,11 +659,13 @@ main(
 [percent] : %d,\n\
 [interval] : %d,\n\
 [wait_time] : %d,\n\
+[max_table_id] : %d,\n\
+[sleep] : %d,\n\
 [warn] : %d,\n\
 [ratio] : %s,\n\
 [sql] : %s\n\n", global_info.host, global_info.port, global_info.username, 
                 global_info.password, global_info.concurrency, global_info.time, global_info.tablename,
-                 global_info.max_pk_value_str, global_info.percent, global_info.interval, global_info.wait_time, 
+                 global_info.max_pk_value_str, global_info.percent, global_info.interval, global_info.wait_time, global_info.max_table_id, global_info.sleep, 
                  global_info.is_warn, global_info.ratio_str, global_info.sql);
     
     if (global_info.is_warn)

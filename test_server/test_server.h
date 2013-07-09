@@ -45,6 +45,18 @@
 //#include <my_global.h>
 //#include <my_sys.h>
 
+void my_msleep(unsigned int m_seconds)
+{
+#if defined(__WIN__)
+    Sleep(m_seconds/1000+1);      /* Sleep() has millisecond arg */
+#else
+    struct timeval t;
+    t.tv_sec=  m_seconds / 1000000L;
+    t.tv_usec= m_seconds % 1000000L;
+    select(0,0,0,0,&t); /* sleep */
+#endif
+}
+
 #define MAX_STRLEN 128
 
 #define SQL_TYPE_UNKNOW 0
@@ -76,6 +88,9 @@ struct global_info_stuct
     gint        interval;
     gint        wait_time;
     gint        is_warn;
+    gint        min_table_id;
+    gint        max_table_id;
+    gint        sleep;
 };
 
 
