@@ -576,6 +576,7 @@ test_server_warn_data()
     if (mysql_real_connect(conn, global_info.host, global_info.username, global_info.password, NULL, global_info.port, NULL, 0) == NULL)
     {
         fprintf(stderr, "%s: mysql_real_connect fail", G_STRLOC);
+		mysql_print_error(conn, NULL);
         errnum = -1;
         goto err;
     }
@@ -586,7 +587,8 @@ test_server_warn_data()
 
         if (mysql_query(conn, buff))
         {
-            fprintf(stderr, "%s: mysql_real_connect %s fail", G_STRLOC, buff);
+            fprintf(stderr, "%s: mysql_query %s fail", G_STRLOC, buff);
+			mysql_print_error(conn, NULL);
             errnum = -1;
             goto err;
         }
@@ -597,6 +599,7 @@ test_server_warn_data()
             if (res_set == NULL)
             {
                 fprintf(stderr, "%s: mysql_store_result %s fail", G_STRLOC, buff);
+				mysql_print_error(conn, NULL);
                 errnum = -1;
                 goto err;
             }
